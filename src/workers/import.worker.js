@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "worker_threads";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
+import _ from "lodash";
 
 import Agent from "../models/Agent.js";
 import User from "../models/User.js";
@@ -10,26 +11,9 @@ import Carrier from "../models/Carrier.js";
 import Policy from "../models/Policy.js";
 
 import { parseFile } from "../utils/file-parser.js";
+import { bulkUpsert } from "../helper/csvhelper.js";
 
 dotenv.config();
-
-const normalize = (value) => {
-    if (value === null || value === undefined) {
-        return "";
-    }
-
-    return String(value).trim();
-};
-
-const parseDate = (value) => {
-    if (!value) {
-        return null;
-    }
-
-    const date = new Date(value);
-
-    return Number.isNaN(date.getTime()) ? null : date;
-};
 
 const importData = async () => {
     await mongoose.connect(process.env.MONGODB_URI);
@@ -47,162 +31,126 @@ const importData = async () => {
     const lobCache = new Set();
     const carrierCache = new Set();
 
-    const users = rows.map((item) => {
+    const users = _.uniqBy(
+        _.compact(
+            rows.map((item) => {
+                const firstName = _.trim(_.get(item, "firstname", ""));
+                const email = _.toLower(_.trim(_.get(item, "email", "")));
 
-        if (!item.firstname || !item.email) {
-            return
-        }
+                if (!firstName || !email) return null;
 
-        const phoneNumber = item.phone?.toString();
-        const name = item.firstname?.trim().toLowerCase();
-
-
-
-        const key = `${phoneNumber}_${name}`
-
-
-        if (!userCache.has(key)) {
-            userCache.add(key);
-
-            return {
-                firstName: item.firstname,
-                dob: item.dob,
-                address: item.address,
-                phoneNumber,
-                state: item.state,
-                zipCode: item.zip?.toString(),
-                email: item.email?.trim().toLowerCase(),
-                gender: item.gender,
-                userType: item.userType
-            };
-        }
-    }).filter(Boolean);
-
-    const carriers = rows.map((item) => {
-        const companyName = item.company_name?.trim();
-
-        if (!carrierCache.has(companyName.toLowerCase())) {
-            carrierCache.add(companyName.toLowerCase())
-            return {
-                companyName
-            };
-        }
-    }).filter(Boolean);
-
-
-    const lobs = rows.map((item) => {
-        const categoryName = item.category_name?.trim();
-
-        if (!lobCache.has(categoryName.toLowerCase())) {
-            lobCache.add(categoryName.toLowerCase());
-
-            return {
-                categoryName
-            };
-        }
-    }).filter(Boolean);
-
-
-    const agents = rows.map((item) => {
-        const agentName = item.agent?.trim();
-
-        if (!agentName) return;
-
-        if (!agentCache.has(agentName.toLowerCase())) {
-            agentCache.add(agentName.toLowerCase());
-
-            return {
-                agentName
-            };
-        }
-    }).filter(Boolean);
-
-
-    const userAccounts = rows.map((item) => {
-        const accountName = item.account_name?.trim();
-
-        if (!accountName) return;
-
-        if (!accountCache.has(accountName.toLowerCase())) {
-            accountCache.add(accountName.toLowerCase());
-
-            return {
-                accountName
-            };
-        }
-    }).filter(Boolean);
-
-
-
-    await User.bulkWrite(
-        users.map((user) => ({
-            updateOne: {
-                filter: {
-                    email: user.email,
-                    phoneNumber: user.phoneNumber
-                },
-                update: {
-                    $set: user
-                },
-                upsert: true
-            }
-        }))
+                return {
+                    firstName : firstName,
+                    dob: _.get(item, "dob", null),
+                    address: _.get(item, "address", null),
+                    phoneNumber: _.toString(_.get(item, "phone", "")),
+                    state: _.get(item, "state", null),
+                    zipCode: _.toString(_.get(item, "zip", "")),
+                    email,
+                    gender: _.get(item, "gender", null),
+                    userType: _.get(item, "userType", null),
+                };
+            })
+        ),
+        (user) => `${user.phoneNumber}_${_.toLower(_.trim(user.firstName))}`
     );
 
-    await Carrier.bulkWrite(
-        carriers.map((carrier) => ({
-            updateOne: {
-                filter: {
-                    companyName: carrier.companyName
-                },
-                update: {
-                    $set: carrier
-                },
-                upsert: true
-            }
-        }))
+    const carriers = _.uniqBy(
+        _.compact(
+            rows.map((item) => {
+                const companyName = _.trim(
+                    _.get(item, "company_name", "")
+                );
+
+                if (!companyName) return null;
+
+                return {
+                    companyName,
+                };
+            })
+        ),
+        (carrier) => _.toLower(_.trim(carrier.companyName))
     );
 
-    await LOB.bulkWrite(
-        lobs.map((lob) => ({
-            updateOne: {
-                filter: {
-                    categoryName: lob.categoryName
-                },
-                update: {
-                    $set: lob
-                },
-                upsert: true
-            }
-        }))
+    const lobs = _.uniqBy(
+        _.compact(
+            rows.map((item) => {
+                const categoryName = _.trim(
+                    _.get(item, "category_name", "")
+                );
+
+                if (!categoryName) return null;
+
+                return {
+                    categoryName,
+                };
+            })
+        ),
+        (lob) => _.toLower(_.trim(lob.categoryName))
     );
 
-    await Agent.bulkWrite(
-        agents.map((agent) => ({
-            updateOne: {
-                filter: {
-                    agentName: agent.agentName
-                },
-                update: {
-                    $set: agent
-                },
-                upsert: true
-            }
-        }))
+    const agents = _.uniqBy(
+        _.compact(
+            rows.map((item) => {
+                const agentName = _.trim(
+                    _.get(item, "agent", "")
+                );
+
+                if (!agentName) return null;
+
+                return {
+                    agentName,
+                };
+            })
+        ),
+        (agent) => _.toLower(_.trim(agent.agentName))
     );
 
-    await UserAccount.bulkWrite(
-        userAccounts.map((account) => ({
-            updateOne: {
-                filter: {
-                    accountName: account.accountName
-                },
-                update: {
-                    $set: account
-                },
-                upsert: true
-            }
-        }))
+    const userAccounts = _.uniqBy(
+        _.compact(
+            rows.map((item) => {
+                const accountName = _.trim(
+                    _.get(item, "account_name", "")
+                );
+
+                if (!accountName) return null;
+
+                return {
+                    accountName,
+                };
+            })
+        ),
+        (account) => _.toLower(_.trim(account.accountName))
+    );
+
+    await bulkUpsert(
+        User,
+        users,
+        ["email", "phoneNumber"]
+    );
+    
+    await bulkUpsert(
+        Carrier,
+        carriers,
+        ["companyName"]
+    );
+    
+    await bulkUpsert(
+        LOB,
+        lobs,
+        ["categoryName"]
+    );
+    
+    await bulkUpsert(
+        Agent,
+        agents,
+        ["agentName"]
+    );
+
+    await bulkUpsert(
+        UserAccount,
+        userAccounts,
+        ["accountName"]
     );
 
 
@@ -210,53 +158,58 @@ const importData = async () => {
     const carriersDB = await Carrier.find();
     const usersDB = await User.find();
 
-    const policies = rows
-        .map((item) => {
-            const lob = lobsDB.find(
-                (l) =>
-                    l.categoryName.toLowerCase() ===
-                    item.category_name?.trim().toLowerCase()
+    const lobMap = _.keyBy(
+        lobsDB,
+        (lob) => _.toLower(_.trim(_.get(lob, "categoryName", "")))
+    );
+    
+    const carrierMap = _.keyBy(
+        carriersDB,
+        (carrier) => _.toLower(_.trim(_.get(carrier, "companyName", "")))
+    );
+    
+    const userMap = _.keyBy(
+        usersDB,
+        (user) => _.toLower(_.trim(_.get(user, "email", "")))
+    );
+    
+    const policies = _.compact(
+        rows.map((item) => {
+            const categoryName = _.toLower(
+                _.trim(_.get(item, "category_name", ""))
             );
-
-            const carrier = carriersDB.find(
-                (c) =>
-                    c.companyName.toLowerCase() ===
-                    item.company_name?.trim().toLowerCase()
+    
+            const companyName = _.toLower(
+                _.trim(_.get(item, "company_name", ""))
             );
-
-            const user = usersDB.find(
-                (u) =>
-                    u.email?.toLowerCase() ===
-                    item.email?.trim().toLowerCase()
+    
+            const email = _.toLower(
+                _.trim(_.get(item, "email", ""))
             );
-
+    
+            const lob = _.get(lobMap, categoryName);
+            const carrier = _.get(carrierMap, companyName);
+            const user = _.get(userMap, email);
+    
             if (!lob || !carrier || !user) {
                 return null;
             }
-
+    
             return {
-                policyNumber: item.policy_number,
-                policyStartDate: item.policy_start_date,
-                policyEndDate: item.policy_end_date,
-                policyCategory: lob._id,
-                company: carrier._id,
-                user: user._id
+                policyNumber: _.get(item, "policy_number", null),
+                policyStartDate: _.get(item, "policy_start_date", null),
+                policyEndDate: _.get(item, "policy_end_date", null),
+                policyCategory: _.get(lob, "_id", null),
+                company: _.get(carrier, "_id", null),
+                user: _.get(user, "_id", null),
             };
-        }).filter(Boolean);
+        })
+    );
 
-
-    await Policy.bulkWrite(
-        policies.map((policy) => ({
-            updateOne: {
-                filter: {
-                    policyNumber: policy.policyNumber
-                },
-                update: {
-                    $set: policy
-                },
-                upsert: true
-            }
-        }))
+    await bulkUpsert(
+        Policy,
+        policies,
+        ["policyNumber"]
     );
 
 
@@ -265,7 +218,7 @@ const importData = async () => {
     await mongoose.disconnect();
 
     return {
-        totalRows: rows.length
+        Message: "Data imported successfully."
     };
 };
 
