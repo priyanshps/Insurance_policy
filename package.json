@@ -1,0 +1,20 @@
+{
+    "name": "insurance-policy-api",
+    "version": "1.0.0",
+    "description": "Insurance policy management API",
+    "type": "module",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js"
+    },
+    "dependencies": {
+        "csv-parser": "^3.2.0",
+        "dotenv": "^16.4.7",
+        "express": "^5.1.0",
+        "mongoose": "^8.18.0",
+        "multer": "^2.0.2",
+        "node-cron": "^4.6.0",
+        "xlsx": "^0.18.5"
+    }
+}
